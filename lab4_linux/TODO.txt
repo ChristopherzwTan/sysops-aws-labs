@@ -1,0 +1,9 @@
+1. Make IAM policy
+2. Make IAM role
+3. Make security group
+4. Make webserver
+5. Make cloudwatch_log_metric_filter
+6. cloudwatch_metric_alarm for 404 Errors
+6. cloudwatch_metric_alarm for CPU
+
+
