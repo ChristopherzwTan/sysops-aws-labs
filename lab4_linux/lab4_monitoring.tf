@@ -91,10 +91,18 @@ resource "aws_security_group" "http_ssh" {
   }
 }
 
+data "aws_subnet_ids" "public" {
+  vpc_id = "${var.vpc_id}"
+
+  tags {
+    Name = "Public Subnet 1"
+  }
+}
+
 resource "aws_instance" "i" {
   ami           = "ami-d874e0a0"
   instance_type = "t2.micro"
-  subnet_id     = "${var.subnet_id}"
+  subnet_id     = "${data.aws_subnet_ids.public.ids[0]}"
   security_groups = ["${aws_security_group.http_ssh.id}"]
   key_name = "${var.default_key_name}"
   associate_public_ip_address = "true"
@@ -106,3 +114,60 @@ resource "aws_instance" "i" {
   }
 }
 
+resource "aws_cloudwatch_log_metric_filter" "404_filter" {
+  name           = "404ErrorCounter"
+  pattern        = "[ip, id, user, timestamp, request,status_code=404, size]"
+  log_group_name = "HttpAccessLog"
+
+  metric_transformation {
+    name      = "404Errors"
+    namespace = "LogMetrics"
+    value     = "1"
+  }
+}
+
+/* 
+// This part is according to Terraform breaks automation since email validation is required
+
+resource "aws_sns_topic" "404_notification" {
+  name = "Administrator"
+}
+
+resource "aws_sns_topic_subscription" "404_topic_subscription" {
+  topic_arn = "${aws_sns_topic.404_notification.arn}"
+  protocol = "email"
+  endpoint = "${var.email}"
+}
+
+*/
+
+// Can't do the actions automatically for these
+resource "aws_cloudwatch_metric_alarm" "404_alarm" {
+  alarm_name                = "404ErrorNotification"
+  alarm_description         = "Alert when too many 404s detected on an instance"
+  comparison_operator       = "GreaterThanOrEqualToThreshold"
+  evaluation_periods        = "1"
+  metric_name               = "404Errors"
+  namespace                 = "LogMetrics"
+  period                    = "300"
+  statistic                 = "Sum"
+  threshold                 = "5"
+  insufficient_data_actions = []
+
+  // Action is to send email (via SNS topic) when condition is met
+}
+
+resource "aws_cloudwatch_metric_alarm" "cpu_alarm" {
+  alarm_name                = "CPUUtilizationAlarm"
+  alarm_description         = "Alert when CPU gets too high"
+  comparison_operator       = "GreaterThanOrEqualToThreshold"
+  evaluation_periods        = "1"
+  metric_name               = "CPUUtilization"
+  namespace                 = "AWS/EC2"
+  period                    = "300"
+  statistic                 = "Average"
+  threshold                 = "100"
+  insufficient_data_actions = []
+
+  // EC2 Action is to shutdown webserver when condition is met
+}
