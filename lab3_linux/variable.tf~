@@ -4,4 +4,4 @@ variable "secret_key" {}
 
 variable "aws_region" {}
 
-variable "default_key_name" {}
+variable "vpc_id" {}
