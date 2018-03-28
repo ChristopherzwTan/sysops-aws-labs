@@ -29,19 +29,10 @@ resource "aws_security_group" "http" {
   }
 }
 
-
-data "aws_subnet_ids" "public" {
-  vpc_id = "${var.vpc_id}"
-
-  tags {
-    Name = "Public Subnet 1"
-  }
-}
-
-resource "aws_instance" "i" {
-  ami           = "ami-d874e0a0"
+resource "aws_instance" "webserver" {
+  ami           = "${var.ami_id}"
   instance_type = "t2.micro"
-  subnet_id     = "${data.aws_subnet_ids.public.ids[0]}"
+  subnet_id     = "${var.public_subnet_id}"
   security_groups = ["${aws_security_group.http.id}"]
   key_name = "${var.default_key_name}"
   associate_public_ip_address = "true"
@@ -54,14 +45,14 @@ resource "aws_instance" "i" {
 
 resource "aws_ami_from_instance" "web_ami" {
   name = "WebServer"
-  source_instance_id = "${aws_instance.i.id}"
+  source_instance_id = "${aws_instance.webserver.id}"
+  depends_on = ["aws_instance.webserver"]
 }
 
 // ELB is classic load balancer
 resource "aws_elb" "ws_lb" {
   name               = "webserverloadbalancer"
-  availability_zones = ["us-west-2a", "us-west-2b", "us-west-2c"]
-  subnets = ["${data.aws_subnet_ids.public.ids[0]}"]
+  subnets = ["${var.public_subnet_id}"]
   security_groups = ["${aws_security_group.http.id}"]
 
   listener {
@@ -90,7 +81,7 @@ resource "aws_elb" "ws_lb" {
 
 resource "aws_launch_configuration" "ws_lc" {
   name          = "WebServerLaunchConfiguration"
-  image_id      = "${aws_ami.web_ami.id}"
+  image_id      = "${aws_ami_from_instance.web_ami.id}"
   instance_type = "t2.micro"
   security_groups = ["${aws_security_group.http.id}"]
   key_name = "${var.default_key_name}"
@@ -148,7 +139,7 @@ resource "aws_autoscaling_group" "ws_ag" {
   health_check_type         = "ELB"
   force_delete              = true
   launch_configuration      = "${aws_launch_configuration.ws_lc.name}"
-  vpc_zone_identifier       = ["${var.private_id}"]
+  vpc_zone_identifier       = ["${var.private_subnet_id}"]
   
   load_balancers = ["${aws_elb.ws_lb.name}"]
 }
