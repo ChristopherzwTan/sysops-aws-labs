@@ -1,0 +1,1 @@
+After executing task 1, you must shut down the webserver machine. What happens when putting both task1 and task2 in one terraform process is that the ami created from instance is corrupted due to the machine still running.

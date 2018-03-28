@@ -5,55 +5,16 @@ provider "aws" {
   region = "${var.aws_region}"
 }
 
-resource "aws_security_group" "http" {
-  name        = "HTTP Access"
-  description = "Access to port 80"
-  vpc_id      = "${var.vpc_id}"
-
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  egress {
-    from_port       = 0
-    to_port         = 0
-    protocol        = "-1"
-    cidr_blocks     = ["0.0.0.0/0"]
-  }
-
-  tags {
-    Name = "HTTP Access"
-  }
-}
-
-resource "aws_instance" "webserver" {
-  ami           = "${var.ami_id}"
-  instance_type = "t2.micro"
-  subnet_id     = "${var.public_subnet_id}"
-  security_groups = ["${aws_security_group.http.id}"]
-  key_name = "${var.default_key_name}"
-  associate_public_ip_address = "true"
-  user_data = "${file("UserData.txt")}"
-
-  tags {
-    Name = "Web Server"
-  }
-}
-
 resource "aws_ami_from_instance" "web_ami" {
   name = "WebServer"
-  source_instance_id = "${aws_instance.webserver.id}"
-  depends_on = ["aws_instance.webserver"]
+  source_instance_id = "${var.ami_source_id}"
 }
 
 // ELB is classic load balancer
 resource "aws_elb" "ws_lb" {
   name               = "webserverloadbalancer"
   subnets = ["${var.public_subnet_id}"]
-  security_groups = ["${aws_security_group.http.id}"]
+  security_groups = ["${var.sg_id}"]
 
   listener {
     instance_port     = 80
@@ -83,7 +44,7 @@ resource "aws_launch_configuration" "ws_lc" {
   name          = "WebServerLaunchConfiguration"
   image_id      = "${aws_ami_from_instance.web_ami.id}"
   instance_type = "t2.micro"
-  security_groups = ["${aws_security_group.http.id}"]
+  security_groups = ["${var.sg_id}"]
   key_name = "${var.default_key_name}"
 }
 
