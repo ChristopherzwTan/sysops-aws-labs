@@ -52,60 +52,103 @@ resource "aws_instance" "i" {
   }
 }
 
-resource "aws_ami" "web_ami" {
+resource "aws_ami_from_instance" "web_ami" {
   name = "WebServer"
-
-  virtualization_type = "hvm"
-  root_device_name = "/dev/xvda"
-
-  ebs_block_device {
-      device_name = "/dev/xvda"
-      snapshot_id = "snap-xxxxxxxx"
-      volume_size = 8
-  }  
+  source_instance_id = "${aws_instance.i.id}"
 }
 
 // ELB is classic load balancer
-resource "aws_elb" "bar" {
-  name               = "foobar-terraform-elb"
+resource "aws_elb" "ws_lb" {
+  name               = "webserverloadbalancer"
   availability_zones = ["us-west-2a", "us-west-2b", "us-west-2c"]
-
-  access_logs {
-    bucket        = "foo"
-    bucket_prefix = "bar"
-    interval      = 60
-  }
+  subnets = ["${data.aws_subnet_ids.public.ids[0]}"]
+  security_groups = ["${aws_security_group.http.id}"]
 
   listener {
-    instance_port     = 8000
+    instance_port     = 80
     instance_protocol = "http"
     lb_port           = 80
     lb_protocol       = "http"
   }
 
-  listener {
-    instance_port      = 8000
-    instance_protocol  = "http"
-    lb_port            = 443
-    lb_protocol        = "https"
-    ssl_certificate_id = "arn:aws:iam::123456789012:server-certificate/certName"
-  }
-
   health_check {
     healthy_threshold   = 2
-    unhealthy_threshold = 2
-    timeout             = 3
-    target              = "HTTP:8000/"
-    interval            = 30
+    unhealthy_threshold = 10
+    timeout             = 30
+    target              = "HTTP:80/ec2-stress/index.php"
+    interval            = 60
   }
 
-  instances                   = ["${aws_instance.foo.id}"]
   cross_zone_load_balancing   = true
-  idle_timeout                = 400
   connection_draining         = true
-  connection_draining_timeout = 400
+  connection_draining_timeout = 300
 
   tags {
-    Name = "foobar-terraform-elb"
+    Name = "Webserver"
   }
+}
+
+resource "aws_launch_configuration" "ws_lc" {
+  name          = "WebServerLaunchConfiguration"
+  image_id      = "${aws_ami.web_ami.id}"
+  instance_type = "t2.micro"
+  security_groups = ["${aws_security_group.http.id}"]
+  key_name = "${var.default_key_name}"
+}
+
+resource "aws_cloudwatch_metric_alarm" "scale_up_alarm" {
+  alarm_name                = "WebServerScaleOutAlarm"
+  comparison_operator       = "GreaterThanOrEqualToThreshold"
+  evaluation_periods        = "1"
+  metric_name               = "CPUUtilization"
+  namespace                 = "AWS/EC2"
+  period                    = "60"
+  statistic                 = "Average"
+  threshold                 = "50"
+  alarm_description         = "This metric monitors ec2 cpu utilization to scale up"
+  
+  alarm_actions     = ["${aws_autoscaling_policy.scale_up_policy.arn}"]
+}
+
+resource "aws_cloudwatch_metric_alarm" "scale_down_alarm" {
+  alarm_name                = "WebServerScaleInAlarm"
+  comparison_operator       = "LessThanThreshold"
+  evaluation_periods        = "1"
+  metric_name               = "CPUUtilization"
+  namespace                 = "AWS/EC2"
+  period                    = "60"
+  statistic                 = "Average"
+  threshold                 = "30"
+  alarm_description         = "This metric monitors ec2 cpu utilization to scale down"
+    
+  alarm_actions     = ["${aws_autoscaling_policy.scale_down_policy.arn}"]
+}
+
+resource "aws_autoscaling_policy" "scale_up_policy" {
+  name                    = "Increase Group Size"
+  scaling_adjustment     = 1
+  adjustment_type        = "ChangeInCapacity"
+  cooldown               = 300
+  autoscaling_group_name = "${aws_autoscaling_group.ws_ag.name}"
+}
+
+resource "aws_autoscaling_policy" "scale_down_policy" {
+  name                    = "Decrease Group Size"
+  scaling_adjustment     = -1
+  adjustment_type        = "ChangeInCapacity"
+  cooldown               = 300
+  autoscaling_group_name = "${aws_autoscaling_group.ws_ag.name}"
+}
+
+resource "aws_autoscaling_group" "ws_ag" {
+  name                      = "WebServersASGroup"
+  max_size                  = 4
+  min_size                  = 2
+  health_check_grace_period = 300
+  health_check_type         = "ELB"
+  force_delete              = true
+  launch_configuration      = "${aws_launch_configuration.ws_lc.name}"
+  vpc_zone_identifier       = ["${var.private_id}"]
+  
+  load_balancers = ["${aws_elb.ws_lb.name}"]
 }
